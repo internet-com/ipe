@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	log "github.com/golang/glog"
 	"github.com/gorilla/websocket"
@@ -18,6 +19,8 @@ import (
 
 	"github.com/dimiro1/ipe/utils"
 )
+
+var pong_received bool = false
 
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
@@ -50,6 +53,8 @@ func handleMessages(conn *websocket.Conn, sessionID string, app *app) {
 		switch event.Event {
 		case "pusher:ping":
 			onPing(conn)
+		case "pusher:pong":
+			onPong(conn)
 		case "pusher:subscribe":
 			onSubscribe(conn, sessionID, app, message)
 		case "pusher:unsubscribe":
@@ -104,7 +109,10 @@ func onOpen(conn *websocket.Conn, r *http.Request, sessionID string, app *app) e
 	if err := conn.WriteJSON(newConnectionEstablishedEvent(connection.SocketID)); err != nil {
 		return newGenericReconnectImmediatelyError()
 	}
-
+    
+	
+	heartbeat(conn)
+	
 	return nil
 }
 
@@ -113,10 +121,30 @@ func onClose(sessionID string, app *app) {
 }
 
 func onPing(conn *websocket.Conn) {
+	log.Info("Ping received !")
 	if err := conn.WriteJSON(newPongEvent()); err != nil {
 		emitWSError(newGenericReconnectImmediatelyError(), conn)
 	}
 }
+
+// TODO
+func onPong(conn *websocket.Conn) {
+	log.Info("Pong received !")
+	pong_received = true
+}
+
+// heartbeat send a ping frame to server each
+func heartbeat(conn *websocket.Conn) {
+	if err := conn.WriteJSON(newPingEvent()); err != nil {
+		log.Info("Heartbeat error")
+		emitWSError(newGenericReconnectImmediatelyError(), conn)
+	} else {
+		HEARTBEAT_RATE := 5
+		time.AfterFunc(time.Duration(HEARTBEAT_RATE) * time.Second, func(){heartbeat(conn)})
+	}
+}
+
+
 
 func onClientEvent(conn *websocket.Conn, sessionID string, app *app, message []byte) {
 	if !app.UserEvents {
